@@ -25,7 +25,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     self.frame = frame
 
     # Set the image
-    icon = self.MakeIcon(WXPdemo.GetImage())
+    icon = self.MakeIcon(wx.Image('../../Logos/final/pagekite-icon-16x16.png', wx.BITMAP_TYPE_PNG))
     self.SetIcon(icon, "wxPython Demo")
     self.imgidx = 1
 
@@ -56,7 +56,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     if "wxMSW" in wx.PlatformInfo:
       img = img.Scale(16, 16)
     elif "wxGTK" in wx.PlatformInfo:
-      img = img.Scale(22, 22)
+      pass #img = img.Scale(22, 22)
     # wxMac can be any size upto 128x128, so leave the source img alone....
     icon = wx.IconFromBitmap(img.ConvertToBitmap() )
     return icon
