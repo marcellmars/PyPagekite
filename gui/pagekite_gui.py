@@ -1,21 +1,13 @@
 #!/usr/bin/env python
-import pagekite
+import threading
 import wx
-import wx.lib.embeddedimage
 
-WXPdemo = wx.lib.embeddedimage.PyEmbeddedImage(
-  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAWlJ"
-  "REFUWIW1V1sSwjAIBMebeBU9db2KZ8EPmxbCI4TUnXGskWaXDQktwhjErjERP4XRhER08iPi"
-  "5SKiyQR5JyI7xxB3j7wn5GI6V2hFxM0gJtjYANFBiIjQu7L/1lYlwR0QxLDZhE0II1+CtwRC"
-  "RI8riBva7DL7CC9VAwDbbxwKtdDXwBi7K+1zCP99T1vDFedd8FBwYd6BCAUXuACEF7QsbET/"
-  "FaHs+gDQw4vOLNHkMojAnTw8nlNipIiwmR0DCXJbjCXkFCAL23BnpQgRWt1EMbyujCK9AZzZ"
-  "f+b3sX0oSqJQ6EorFeT4NiL6Wtj0+LXnQAzThYoAAsN6ehqR3sHExmcEqGeFApQLcTvm5Kt9"
-  "wkHGgb+RZwSkyc1dwOcpCtCoNKSz6FRCUQ3o7Nn+5Y+Lg+y5CIXlcyAk99ziiQS32+svz/UY"
-  "vClJoLpIC8gi+VwwfDecEiEtT/WZTJDf94uk1Ru8vbz0cvoF7S2DnpeVL9UAAAAASUVORK5C"
-  "YII=")
+import pagekite
+
 
 class DemoTaskBarIcon(wx.TaskBarIcon):
   TBMENU_RESTORE = wx.NewId()
+  TBMENU_RESTART = wx.NewId()
   TBMENU_CLOSE   = wx.NewId()
   TBMENU_CHANGE  = wx.NewId()
   TBMENU_REMOVE  = wx.NewId()
@@ -26,14 +18,15 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
 
     # Set the image
     icon = self.MakeIcon(wx.Image('pk-logo-127.png', wx.BITMAP_TYPE_PNG))
-    self.SetIcon(icon, "wxPython Demo")
+    self.SetIcon(icon, "Click to examine your pagekites")
     self.imgidx = 1
 
     # bind some events
-    self.Bind(wx.EVT_TASKBAR_LEFT_DCLICK, self.OnTaskBarActivate)
+    self.Bind(wx.EVT_TASKBAR_LEFT_UP, self.OnTaskBarActivate)
+#   self.Bind(wx.EVT_TASKBAR_LEFT_DCLICK, self.OnTaskBarActivate)
+    self.Bind(wx.EVT_MENU, self.OnTaskBarRestart, id=self.TBMENU_RESTART)
     self.Bind(wx.EVT_MENU, self.OnTaskBarActivate, id=self.TBMENU_RESTORE)
     self.Bind(wx.EVT_MENU, self.OnTaskBarClose, id=self.TBMENU_CLOSE)
-
 
   def CreatePopupMenu(self):
     """
@@ -43,10 +36,10 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     the base class takes care of the rest.
     """
     menu = wx.Menu()
-    menu.Append(self.TBMENU_RESTORE, "Restore wxPython Demo")
-    menu.Append(self.TBMENU_CLOSE,   "Close wxPython Demo")
+#   menu.Append(self.TBMENU_RESTORE, "Restore Pagekite")
+    menu.Append(self.TBMENU_RESTART, "Restart Pagekite")
+    menu.Append(self.TBMENU_CLOSE,   "Quit Pagekite")
     return menu
-
 
   def MakeIcon(self, img):
     """
@@ -54,13 +47,12 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     icon size...
     """
     if "wxMSW" in wx.PlatformInfo:
-      img = img.Scale(16, 16)
+      img = img.Scale(16, 16, wx.IMAGE_QUALITY_HIGH)
     elif "wxGTK" in wx.PlatformInfo:
-      img = img.Scale(22, 22)
+      img = img.Scale(22, 22, wx.IMAGE_QUALITY_HIGH)
     # wxMac can be any size upto 128x128, so leave the source img alone....
     icon = wx.IconFromBitmap(img.ConvertToBitmap())
     return icon
-
 
   def OnTaskBarActivate(self, evt):
     if self.frame.IsIconized():
@@ -69,23 +61,54 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
       self.frame.Show(True)
     self.frame.Raise()
 
+  def OnTaskBarRestart(self, evt):
+    self.frame.pagekite.restart()
 
   def OnTaskBarClose(self, evt):
     wx.CallAfter(self.frame.Close)
 
 
+class PageKiteThread(threading.Thread):
+  def __init__(self):
+    threading.Thread.__init__(self)
+    self.alive = False
+    self.pk = None
+
+  def Configure(self, pk):
+    self.pk = pk
+    if not self.alive: raise KeyboardInterrupt('Quit')
+    return pagekite.Configure(pk)
+
+  def run(self):
+    self.alive = True
+    return pagekite.Main(pagekite.PageKite, lambda pk: self.Configure(pk))
+
+  def restart(self):
+    if self.pk:
+      self.pk.looping = False
+      self.pk = None
+
+  def quit(self):
+    if self.pk: self.pk.looping = self.alive = False
+
 
 class MainFrame(wx.Frame):
   def __init__(self, parent):
-    wx.Frame.__init__(self, parent, title="Hello World")
+    wx.Frame.__init__(self, parent, title="Pagekite")
     self.tbicon = DemoTaskBarIcon(self)
     self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
 
+    self.pagekite = PageKiteThread()
+    self.pagekite.start()
+
   def OnCloseWindow(self, evt):
+    self.pagekite.quit()
     self.tbicon.Destroy()
     evt.Skip()
 
 
-app = wx.App(redirect=False)
-frame = MainFrame(None)
-app.MainLoop()
+if __name__ == '__main__':
+  app = wx.App(redirect=False)
+  frame = MainFrame(None)
+  app.MainLoop()
+
