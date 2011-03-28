@@ -1,4 +1,35 @@
-#!/usr/bin/env python
+#!/usr/bin/python -u
+#
+# pagekite_gui.py, Copyright 2010, 2011, the Beanstalks Project ehf.
+#                                        and Bjarni Runar Einarsson
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
+#
+# This program wraps pagekite.py in a very simple GUI.
+#
+# Features:
+#   - Creates a taskbar icon for:
+#      - Displaying a brief status summary.
+#      - Restarting or quitting
+#      - Opening up the control panel UI in your browser
+#
+# TODO:
+#   - Make the taskbar icon change depending on activity.
+#   - Enable remote mode, for controlling a system-wide pagekite.py?
+#
 import threading
 import webbrowser
 import wx
@@ -113,9 +144,11 @@ class MainFrame(wx.Frame):
   def __init__(self, parent):
     wx.Frame.__init__(self, parent, title="Pagekite")
     self.tbicon = DemoTaskBarIcon(self)
-    self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
+
     self.pagekite = PageKiteThread(self)
     self.pagekite.start()
+
+    self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
 
   def OnCloseWindow(self, evt):
     self.pagekite.quit()
