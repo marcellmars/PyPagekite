@@ -30,6 +30,7 @@
 #   - Make the taskbar icon change depending on activity.
 #   - Enable remote mode, for controlling a system-wide pagekite.py?
 #
+import sys
 import threading
 import webbrowser
 import wx
@@ -42,13 +43,16 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
   TBMENU_RESTART = wx.NewId()
   TBMENU_CONSOLE = wx.NewId()
   TBMENU_CLOSE   = wx.NewId()
+  TBMENU_STATUS  = wx.NewId()
   TBMENU_CHANGE  = wx.NewId()
   TBMENU_REMOVE  = wx.NewId()
+  TBMENU_CHECKABLE  = wx.NewId()
 
   def __init__(self, frame):
     wx.TaskBarIcon.__init__(self)
     self.frame = frame
     self.consoleMenuItem = None
+    self.statusMenuItem = None
 
     # Set the image
     icon = self.MakeIcon(wx.Image('pk-logo-127.png', wx.BITMAP_TYPE_PNG))
@@ -62,6 +66,9 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     self.Bind(wx.EVT_MENU, self.OnTaskBarRestart, id=self.TBMENU_RESTART)
     self.Bind(wx.EVT_MENU, self.OnTaskBarActivate, id=self.TBMENU_RESTORE)
     self.Bind(wx.EVT_MENU, self.OnTaskBarClose, id=self.TBMENU_CLOSE)
+    self.Bind(wx.EVT_MENU, self.OnTaskBarClose, id=self.TBMENU_CLOSE)
+
+    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenu, id=self.TBMENU_STATUS)
 
   def CreatePopupMenu(self):
     """
@@ -70,9 +77,12 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     the menu how you want it and return it from this function,
     the base class takes care of the rest.
     """
-    menu = wx.Menu()
+    menu = self.popupMenu = wx.Menu()
 #   menu.Append(self.TBMENU_RESTORE, "Restore Pagekite")
     self.consoleMenuItem = menu.Append(self.TBMENU_CONSOLE, "Control Panel")
+    menu.AppendSeparator()
+    self.statusMenuItem = menu.Append(self.TBMENU_STATUS, "Status: Live")
+    self.statusMenuItem.Enable(False)
     menu.AppendSeparator()
     menu.Append(self.TBMENU_RESTART, "Restart")
     menu.Append(self.TBMENU_CLOSE,   "Quit")
@@ -90,6 +100,10 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     # wxMac can be any size upto 128x128, so leave the source img alone....
     icon = wx.IconFromBitmap(img.ConvertToBitmap())
     return icon
+
+  def OnUpdateMenu(self, event):
+    self.popupMenu.SetLabel(self.TBMENU_STATUS, "Status: Dead")
+    #event.Enable(True)
 
   def OnTaskBarActivate(self, evt):
     if self.frame.IsIconized():
@@ -140,24 +154,64 @@ class PageKiteThread(threading.Thread):
     if self.pk: self.pk.looping = self.alive = False
 
 
-class MainFrame(wx.Frame):
-  def __init__(self, parent):
-    wx.Frame.__init__(self, parent, title="Pagekite")
-    self.tbicon = DemoTaskBarIcon(self)
+class RedirectText:
+  def __init__(self, aWxTextCtrl):
+    self.out = aWxTextCtrl
+    self.buf = []
 
-    self.pagekite = PageKiteThread(self)
-    self.pagekite.start()
+  def write(self, string):
+    self.buf.append(string)
+
+  def flush(self):
+    # This can only happen on the main thread, or everything asplodes.
+    for string in self.buf:
+      self.out.WriteText(string)
+
+
+class MainFrame(wx.Frame):
+  FRAME_SIZE = (600, 400)
+
+  def __init__(self, parent):
+    wx.Frame.__init__(self, parent, title="Pagekite", size=self.FRAME_SIZE)
+    self.tbicon = DemoTaskBarIcon(self)
+    self.panel = wx.Panel(self, -1, size=self.FRAME_SIZE)
+    self.log = wx.TextCtrl(self.panel, -1, size=self.FRAME_SIZE,
+                           style=wx.TE_MULTILINE|wx.HSCROLL)
+
+    pagekite.LogFile = sys.stderr = sys.stdout = RedirectText(self.log)
 
     self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
+    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateUI)
+
+  def StartPageKite(self):
+    self.pagekite = PageKiteThread(self)
+    self.pagekite.start()
 
   def OnCloseWindow(self, evt):
     self.pagekite.quit()
     self.tbicon.Destroy()
     evt.Skip()
 
+  def OnUpdateUI(self, event):
+    self.log.flush()
+
+
+
+class PkApp(wx.App):
+  def __init__(self, redirect=False):
+    wx.App.__init__(self, redirect=redirect)
+    self.frame = MainFrame(None)
+    self.frame.Show()
+    self.frame.StartPageKite()
+
 
 if __name__ == '__main__':
-  app = wx.App(redirect=False)
-  frame = MainFrame(None)
+  app = PkApp(redirect=False)
   app.MainLoop()
+
+#  from wx import py
+#  shell = py.shell.ShellFrame(frame,
+#                              locals=dict(wx=wx, frame=frame, app=app))
+#  shell.Show() 
+
 
