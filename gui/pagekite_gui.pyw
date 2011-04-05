@@ -37,21 +37,23 @@ import wx
 
 import pagekite
 
+EVT_NEW_LOGLINE = wx.PyEventBinder(wx.NewEventType(), 0)
+
 
 class DemoTaskBarIcon(wx.TaskBarIcon):
-  TBMENU_RESTORE = wx.NewId()
+  TBMENU_LOGVIEW = wx.NewId()
   TBMENU_RESTART = wx.NewId()
   TBMENU_CONSOLE = wx.NewId()
   TBMENU_CLOSE   = wx.NewId()
   TBMENU_STATUS  = wx.NewId()
   TBMENU_CHANGE  = wx.NewId()
   TBMENU_REMOVE  = wx.NewId()
+  TBMENU_DEBUG   = wx.NewId()
   TBMENU_CHECKABLE  = wx.NewId()
 
-  def __init__(self, frame):
+  def __init__(self, main):
     wx.TaskBarIcon.__init__(self)
-    self.frame = frame
-    self.consoleMenuItem = None
+    self.main = main
     self.statusMenuItem = None
 
     # Set the image
@@ -62,13 +64,15 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     # bind some events
     self.Bind(wx.EVT_TASKBAR_LEFT_UP, self.OnTaskBarActivate)
 #   self.Bind(wx.EVT_TASKBAR_LEFT_DCLICK, self.OnTaskBarActivate)
+    self.Bind(wx.EVT_MENU, self.OnTaskBarActivate, id=self.TBMENU_LOGVIEW)
     self.Bind(wx.EVT_MENU, self.OnTaskBarConsole, id=self.TBMENU_CONSOLE)
+    self.Bind(wx.EVT_MENU, self.OnTaskBarDebug, id=self.TBMENU_DEBUG)
     self.Bind(wx.EVT_MENU, self.OnTaskBarRestart, id=self.TBMENU_RESTART)
-    self.Bind(wx.EVT_MENU, self.OnTaskBarActivate, id=self.TBMENU_RESTORE)
-    self.Bind(wx.EVT_MENU, self.OnTaskBarClose, id=self.TBMENU_CLOSE)
     self.Bind(wx.EVT_MENU, self.OnTaskBarClose, id=self.TBMENU_CLOSE)
 
-    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenu, id=self.TBMENU_STATUS)
+    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuConsole, id=self.TBMENU_CONSOLE)
+    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuStatus, id=self.TBMENU_STATUS)
+    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuDebug, id=self.TBMENU_DEBUG)
 
   def CreatePopupMenu(self):
     """
@@ -78,11 +82,12 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     the base class takes care of the rest.
     """
     menu = self.popupMenu = wx.Menu()
-#   menu.Append(self.TBMENU_RESTORE, "Restore Pagekite")
-    self.consoleMenuItem = menu.Append(self.TBMENU_CONSOLE, "Control Panel")
+    menu.Append(self.TBMENU_LOGVIEW, "Display Log Window")
+    menu.Append(self.TBMENU_CONSOLE, "Open Admin Webpage")
     menu.AppendSeparator()
-    self.statusMenuItem = menu.Append(self.TBMENU_STATUS, "Status: Live")
+    self.statusMenuItem = menu.Append(self.TBMENU_STATUS, "Status: ??")
     self.statusMenuItem.Enable(False)
+    menu.Append(self.TBMENU_DEBUG, "Debugging: ?")
     menu.AppendSeparator()
     menu.Append(self.TBMENU_RESTART, "Restart")
     menu.Append(self.TBMENU_CLOSE,   "Quit")
@@ -101,31 +106,69 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     icon = wx.IconFromBitmap(img.ConvertToBitmap())
     return icon
 
-  def OnUpdateMenu(self, event):
+  def OnUpdateMenuDebug(self, event):
+    if self.main.debugging:
+      self.popupMenu.SetLabel(self.TBMENU_DEBUG, "Debugging: on")
+    else:
+      self.popupMenu.SetLabel(self.TBMENU_DEBUG, "Debugging: off")
+
+  def OnUpdateMenuStatus(self, event):
+    # FIXME
     self.popupMenu.SetLabel(self.TBMENU_STATUS, "Status: Dead")
-    #event.Enable(True)
+
+  def OnUpdateMenuConsole(self, event):
+    if self.main.pagekite and self.main.pagekite.pk.ui_httpd:
+      event.Enable(True)
+    else:
+      event.Enable(False)
+
+  def OnTaskBarDebug(self, evt):
+    self.main.debugging = not self.main.debugging
 
   def OnTaskBarActivate(self, evt):
-    if self.frame.IsIconized():
-      self.frame.Iconize(False)
-    if not self.frame.IsShown():
-      self.frame.Show(True)
-    self.frame.Raise()
+    if self.main.IsIconized():
+      self.main.Iconize(False)
+    else:
+      self.main.Iconize(True)
+
+    if self.main.IsShown():
+      self.main.Show(False)
+    else:
+      self.main.Show(True)
+      self.main.Raise()
 
   def OnTaskBarRestart(self, evt):
-    self.frame.pagekite.restart()
+    self.main.pagekite.restart()
 
   def OnTaskBarConsole(self, evt):
-    if self.frame and self.frame.pagekite and self.frame.pagekite.pk.ui_httpd:
-      webbrowser.open_new('http://%s:%s/' % self.frame.pagekite.pk.ui_sspec)
-    else:
-      wx.MessageBox('The console is disabled',
-                    caption='Sorry about that', style=wx.OK | wx.CENTRE)
-
+    webbrowser.open_new('http://%s:%s/' % self.main.pagekite.pk.ui_sspec)
 
   def OnTaskBarClose(self, evt):
-    wx.CallAfter(self.frame.Close)
+    self.main.Close(force=True)
 
+
+class LogLineEvent(wx.PyCommandEvent):
+  def __init__(self, eventtype=EVT_NEW_LOGLINE.evtType[0], id=0):
+    wx.PyCommandEvent.__init__(self, eventtype, id)
+    self.logline = None
+
+class LogTee:
+  def __init__(self, frame, oldfd):
+    self.frame = frame
+    self.oldfd = oldfd
+
+  def write(self, string):
+    lle = LogLineEvent()
+    lle.logline = string
+    self.frame.AddPendingEvent(lle)
+    self.oldfd.write(string)
+
+def LogFilter(frame, func):
+  def Logger(values):
+    if frame.debugging: return func(values)
+    words, wdict = pagekite.LogValues(values)
+    if 'debug' not in wdict: return func(values)
+  return Logger
 
 class PageKiteThread(threading.Thread):
   def __init__(self, frame):
@@ -133,12 +176,25 @@ class PageKiteThread(threading.Thread):
     self.frame = frame
     self.alive = False
     self.pk = None
+    self.old_log = pagekite.Log
+    self.old_logfile = pagekite.LogFile
 
   def Configure(self, pk):
     self.pk = pk
     if not self.alive: raise KeyboardInterrupt('Quit')
-    rv = pagekite.Configure(pk)
-    return rv
+
+    # FIXME: the pagekite.py log handing is dumb, so this sucks.
+    try:
+      pagekite.Log = self.old_log
+      pagekite.LogFile = self.old_logfile
+      rv = pagekite.Configure(pk)
+      pagekite.LogFile = LogTee(self.frame, pagekite.LogFile)
+      pagekite.Log = LogFilter(self.frame, pagekite.Log)
+
+      return rv
+    except pagekite.ConfigError, e:
+      self.frame.Close(force=True)
+      raise pagekite.ConfigError(e)
 
   def run(self):
     self.alive = True
@@ -151,67 +207,56 @@ class PageKiteThread(threading.Thread):
 
   def quit(self):
     self.frame = None
+    pagekite.Log = self.old_log
     if self.pk: self.pk.looping = self.alive = False
 
 
-class RedirectText:
-  def __init__(self, aWxTextCtrl):
-    self.out = aWxTextCtrl
-    self.buf = []
-
-  def write(self, string):
-    self.buf.append(string)
-
-  def flush(self):
-    # This can only happen on the main thread, or everything asplodes.
-    for string in self.buf:
-      self.out.WriteText(string)
-
-
 class MainFrame(wx.Frame):
-  FRAME_SIZE = (600, 400)
+  FRAME_SIZE = (600, 450)
+  LOG_STYLE = wx.TE_MULTILINE|wx.TE_READONLY|wx.HSCROLL
 
   def __init__(self, parent):
     wx.Frame.__init__(self, parent, title="Pagekite", size=self.FRAME_SIZE)
-    self.tbicon = DemoTaskBarIcon(self)
-    self.panel = wx.Panel(self, -1, size=self.FRAME_SIZE)
-    self.log = wx.TextCtrl(self.panel, -1, size=self.FRAME_SIZE,
-                           style=wx.TE_MULTILINE|wx.HSCROLL)
+    self.debugging = False
 
-    pagekite.LogFile = sys.stderr = sys.stdout = RedirectText(self.log)
+    self.tbicon = DemoTaskBarIcon(self)
+    self.log = wx.TextCtrl(self, -1, style=self.LOG_STYLE)
 
     self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
-    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateUI)
+    self.Bind(EVT_NEW_LOGLINE, self.OnNewLogLine)
 
   def StartPageKite(self):
     self.pagekite = PageKiteThread(self)
     self.pagekite.start()
 
   def OnCloseWindow(self, evt):
-    self.pagekite.quit()
-    self.tbicon.Destroy()
-    evt.Skip()
+    if evt.CanVeto():
+      self.Hide()
+      evt.Veto()
+    else:
+      #if we don't veto it we allow the event to propogate
+      self.pagekite.quit()
+      self.tbicon.Destroy()
+      pagekite.LogFile = sys.stderr
+      self.log.Destroy()
+      evt.Skip()
 
-  def OnUpdateUI(self, event):
-    self.log.flush()
-
+  def OnNewLogLine(self, event):
+    if self.log.GetNumberOfLines() > 100:
+      self.log.Remove(0, self.log.GetLineLength(0)+1)
+    self.log.SetInsertionPointEnd()
+    self.log.WriteText(event.logline)
 
 
 class PkApp(wx.App):
   def __init__(self, redirect=False):
     wx.App.__init__(self, redirect=redirect)
-    self.frame = MainFrame(None)
-    self.frame.Show()
-    self.frame.StartPageKite()
+    self.main = MainFrame(None)
+    self.main.Hide()
+    self.main.StartPageKite()
 
 
 if __name__ == '__main__':
   app = PkApp(redirect=False)
   app.MainLoop()
-
-#  from wx import py
-#  shell = py.shell.ShellFrame(frame,
-#                              locals=dict(wx=wx, frame=frame, app=app))
-#  shell.Show() 
-
 
