@@ -119,14 +119,25 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
         self.kites.append(kite)
     if self.kites: self.kiteMenu.AppendSeparator()
     self.kiteMenu.Append(self.TBMENU_GETKITE, "Get More Kites...")
-
     menu.AppendMenu(self.TBMENU_KITES, "No Kites Configured", self.kiteMenu)
     menu.AppendSeparator()
 
     # FIXME: Only add these two if we are using the service.
-    menu.Append(self.TBMENU_QUOTA, "0.00 GB of Quota Left")
+
+    if self.main.pagekite and self.main.pagekite.pk:
+      conns = self.main.pagekite.pk.conns
+      quotas = [float(c.quota[0]) for c in conns.conns if c.quota]
+      if quotas:
+        print 'Quotas: %s' % (quotas, )
+        menu.Append(self.TBMENU_QUOTA, ("%.2f GB of Quota Left"
+                                        ) % (min(quotas)/(1024*1024)))
+      else:
+        menu.Append(self.TBMENU_QUOTA, "Quota unknown")
+    else:
+      menu.Append(self.TBMENU_QUOTA, "Quota unknown")
     menu.Append(self.TBMENU_GETQUOTA, "Get More Quota...")
     menu.AppendSeparator()
+
     menu.Append(self.TBMENU_DEBUG,  "Enable Verbose Logging", kind=wx.ITEM_CHECK)
     menu.Append(self.TBMENU_ENABLE, "Enable PageKite", kind=wx.ITEM_CHECK)
     menu.Append(self.TBMENU_CLOSE,   "Quit PageKite")
