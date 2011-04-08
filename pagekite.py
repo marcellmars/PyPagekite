@@ -742,6 +742,7 @@ class AuthThread(threading.Thread):
     self.qc = threading.Condition()
     self.jobs = []
     self.conns = conns
+    self.running = False
 
   def check(self, requests, conn, callback):
     self.qc.acquire()
@@ -757,6 +758,7 @@ class AuthThread(threading.Thread):
 
   def run(self):
     self.keep_running = True
+    self.running = True
     self.qc.acquire()
     while self.keep_running:
       if self.jobs:
@@ -804,6 +806,8 @@ class AuthThread(threading.Thread):
       
     self.buffering = 0
     self.qc.release()
+    self.running = False
+    LogDebug("AuthThread: done")
 
 
 def fmt_size(count):
@@ -1062,6 +1066,7 @@ class HttpUiThread(threading.Thread):
                         ssl_pem_filename=ssl_pem_filename)
     self.httpd.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     self.serve = True
+    self.running = False
 
     global SELECTABLES
     SELECTABLES = {}
@@ -1076,6 +1081,7 @@ class HttpUiThread(threading.Thread):
       pass
 
   def run(self):
+    self.running = True
     while self.serve:
       try:
         self.httpd.handle_request()
@@ -1083,8 +1089,9 @@ class HttpUiThread(threading.Thread):
         self.serve = False
       except Exception, e:
         LogDebug('HTTP UI caught exception: %s' % e)
-    LogDebug('HttpUiThread: done')
     self.httpd.socket.close()
+    self.running = False
+    LogDebug("HttpUIThread: done")
 
 
 HTTP_METHODS = ['OPTIONS', 'CONNECT', 'GET', 'HEAD', 'POST', 'PUT', 'TRACE',
@@ -2809,6 +2816,7 @@ class TunnelManager(threading.Thread):
     threading.Thread.__init__(self)
     self.pkite = pkite
     self.conns = conns
+    self.running = False
 
   def CheckTunnelQuotas(self, now):
     for tid in self.conns.tunnels:
@@ -2834,6 +2842,7 @@ class TunnelManager(threading.Thread):
 
   def run(self):
     check_interval = 5
+    self.running = True
     self.keep_running = True
     while self.keep_running:
 
@@ -2853,6 +2862,12 @@ class TunnelManager(threading.Thread):
 
       for i in xrange(0, check_interval):
         if self.keep_running: time.sleep(1)
+
+    if self.pkite.conns:
+      for conn in self.pkite.conns.conns: conn.Cleanup()
+
+    self.running = False
+    LogDebug('TunnelManager: done')
 
 
 class PageKite(object):
@@ -3041,6 +3056,8 @@ class PageKite(object):
     if self.conns and self.conns.auth: self.conns.auth.quit()
     if self.ui_httpd: self.ui_httpd.quit()
     if self.tunnel_manager: self.tunnel_manager.quit()
+    while self.IsRunning(): time.sleep(0.5)
+
     self.conns = self.ui_httpd = self.tunnel_manager = None
     if help:
       print DOC
@@ -3694,6 +3711,12 @@ class PageKite(object):
     if self.conns:
       if self.conns.auth: self.conns.auth.quit()
       for conn in self.conns.conns: conn.Cleanup()
+
+  def IsRunning(self):
+    if self.ui_httpd and self.ui_httpd.running: return True
+    if self.tunnel_manager and self.tunnel_manager.running: return True
+    if self.conns and self.conns.auth and self.conns.auth.running: return True
+    return self.looping
 
 
 ##[ Main ]#####################################################################
