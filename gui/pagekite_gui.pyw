@@ -124,7 +124,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
 
     # FIXME: Only add these two if we are using the service.
 
-    if self.main.pagekite and self.main.pagekite.pk:
+    if self.main.pagekite and self.main.pagekite.pk and self.main.pagekite.pk.conns:
       conns = self.main.pagekite.pk.conns
       quotas = [float(c.quota[0]) for c in conns.conns if c.quota]
       if quotas:
@@ -140,7 +140,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
 
     menu.Append(self.TBMENU_DEBUG,  "Enable Verbose Logging", kind=wx.ITEM_CHECK)
     menu.Append(self.TBMENU_ENABLE, "Enable PageKite", kind=wx.ITEM_CHECK)
-    menu.Append(self.TBMENU_CLOSE,   "Quit PageKite")
+    menu.Append(self.TBMENU_CLOSE,  "Quit PageKite")
     return menu
 
   def DescribeKite(self, kite):
@@ -166,15 +166,16 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     event.Check(self.main.debugging)
 
   def OnUpdateMenuEnable(self, event):
-    if self.main.pagekite and self.main.pagekite.pk:
-      if self.main.pagekite.pk.looping or not self.main.pagekite.alive:
-        event.Enable(True)
-      else:
+    pagekite = self.main.pagekite
+    if pagekite:
+      event.Check(pagekite.IsRunning())
+      if pagekite.IsStopping():
+        self.popupMenu.SetLabel(self.TBMENU_ENABLE, "Shutting down...")
         event.Enable(False)
+      else:
+        event.Enable(True)
     else:
-      event.Enable(True)
-
-    event.Check(self.main.pagekite.alive)
+      event.Check(False)
 
   def OnUpdateMenuStatus(self, event):
     # FIXME
@@ -199,10 +200,9 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     event.Enable(False)
 
   def OnUpdateMenuConsole(self, event):
-    if self.main.pagekite and self.main.pagekite.pk.ui_httpd:
-      event.Enable(True)
-    else:
-      event.Enable(False)
+    event.Enable((self.main.pagekite and
+                  self.main.pagekite.pk and
+                  self.main.pagekite.pk.ui_httpd) and True or False)
 
   def OnTaskBarDebug(self, evt):
     self.main.debugging = not self.main.debugging
@@ -223,23 +223,19 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     pass
 
   def OnTaskBarActivate(self, evt):
-    if self.main.IsIconized():
+    if self.main.IsIconized() or not self.main.IsShown():
       self.main.Iconize(False)
-    else:
-      self.main.Iconize(True)
-
-    if self.main.IsShown():
-      self.main.Show(False)
-    else:
       self.main.Show(True)
       self.main.Raise()
+    else:
+      self.main.Show(False)
 
   def OnTaskBarEnable(self, evt):
     if self.main.pagekite:
-      if self.main.pagekite.alive:
-        self.main.pagekite.stop_pk()
-      else:
+      if self.main.pagekite.stopped:
         self.main.pagekite.start_pk()
+      else:
+        self.main.pagekite.stop_pk()
 
   def OnTaskBarRestart(self, evt):
     self.main.pagekite.restart()
@@ -284,9 +280,15 @@ class PageKiteThread(threading.Thread):
     self.old_log = pagekite.Log
     self.old_logfile = pagekite.LogFile
 
+  def IsRunning(self):
+    return (self.pk and self.pk.IsRunning()) and True or False
+
+  def IsStopping(self):
+    return (self.IsRunning() and self.stopped) and True or False
+
   def Configure(self, pk):
+    if self.stopped or not self.frame: raise KeyboardInterrupt('Quit')
     self.pk = pk
-    if not self.alive: raise KeyboardInterrupt('Quit')
 
     # FIXME: the pagekite.py log handing is dumb, so this sucks.
     try:
@@ -307,7 +309,11 @@ class PageKiteThread(threading.Thread):
         time.sleep(1)
       else:
         self.alive = True
+        print 'STARTING'
         pagekite.Main(pagekite.PageKite, lambda pk: self.Configure(pk))
+        while self.pk and self.pk.IsRunning(): time.sleep(1)
+        self.pk = None
+        self.alive = False
 
   def start_pk(self):
     self.stopped = False
@@ -315,14 +321,10 @@ class PageKiteThread(threading.Thread):
   def stop_pk(self):
     pagekite.Log = self.old_log
     self.stopped = True
-    if self.pk:
-      self.pk.looping = self.alive = False
-      self.pk = None
+    if self.pk: self.pk.looping = False
 
   def restart(self):
-    if self.pk:
-      self.pk.looping = False
-      self.pk = None
+    if self.pk: self.pk.looping = False
 
   def quit(self):
     self.frame = None
@@ -337,12 +339,13 @@ class MainFrame(wx.Frame):
   def __init__(self, parent):
     wx.Frame.__init__(self, parent, title=self.TITLE, size=self.FRAME_SIZE)
     self.debugging = False
-
-    self.tbicon = DemoTaskBarIcon(self)
     self.log = wx.TextCtrl(self, -1, style=self.LOG_STYLE)
 
     self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
     self.Bind(EVT_NEW_LOGLINE, self.OnNewLogLine)
+
+  def CreateTaskBarIcon(self):
+    self.tbicon = DemoTaskBarIcon(self)
 
   def StartPageKite(self):
     self.pagekite = PageKiteThread(self)
@@ -372,6 +375,7 @@ class PkApp(wx.App):
     wx.App.__init__(self, redirect=redirect)
     self.main = MainFrame(None)
     self.main.Hide()
+    self.main.CreateTaskBarIcon()
     self.main.StartPageKite()
 
 
