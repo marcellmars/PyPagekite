@@ -42,6 +42,16 @@ import wx
 
 import pagekite
 
+
+SERVICE_DOMAINS = [
+  '.pagekite.me', '.pagekite.net', '.pagekite.us', '.pagekite.info'
+]
+URL_HOME     = 'https://pagekite.net/home/'
+URL_SIGNUP   = 'https://pagekite.net/signup/'
+URL_GETKITES = 'http://localhost:8000/signup/?do_login=1&more=kites&r=%s:%s/pagekite/new_kite/'
+URL_GETQUOTA = 'http://localhost:8000/signup/?do_login=1&more=bw'
+
+
 EVT_NEW_LOGLINE = wx.PyEventBinder(wx.NewEventType(), 0)
 
 
@@ -51,10 +61,18 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
 
   TBMENU_KITES   = wx.NewId()
   TBMENU_GETKITE = wx.NewId()
-  TBMENU_STATUS  = wx.NewId()
+
+  TBMENU_WEBCTRL    = wx.NewId()
+  TBMENU_SHARE_PATH = wx.NewId()
+  TBMENU_SHARE_CB   = wx.NewId()
+  TBMENU_SHARE_SCRN = wx.NewId()
+  TBMENU_SHARELOG   = wx.NewId()
+  TBMENU_MIRRORING  = wx.NewId()
+  TBMENU_SHARING    = wx.NewId()
 
   TBMENU_QUOTA    = wx.NewId()
   TBMENU_GETQUOTA = wx.NewId()
+  TBMENU_SIGNUP   = wx.NewId()
 
   TBMENU_DEBUG   = wx.NewId()
   TBMENU_ENABLE  = wx.NewId()
@@ -65,12 +83,11 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
   def __init__(self, main):
     wx.TaskBarIcon.__init__(self)
     self.main = main
-    self.popupMenu = self.kiteMenu = None
-    self.kites = []
+    self.popupMenu = self.kiteMenu = self.webMenu = None
 
     # Set the image
     icon = self.MakeIcon(wx.Image('pk-logo-127.png', wx.BITMAP_TYPE_PNG))
-    self.SetIcon(icon, "Click to examine your pagekites")
+    self.SetIcon(icon, "Click to examine your PageKites")
     self.imgidx = 1
 
     # bind some events
@@ -87,7 +104,6 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     self.Bind(wx.EVT_MENU, self.OnTaskBarClose, id=self.TBMENU_CLOSE)
 
     self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuConsole, id=self.TBMENU_CONSOLE)
-    self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuStatus, id=self.TBMENU_STATUS)
     self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuKites, id=self.TBMENU_KITES)
     self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuQuota, id=self.TBMENU_QUOTA)
     self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenuDebug, id=self.TBMENU_DEBUG)
@@ -102,39 +118,46 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     """
     menu = self.popupMenu = wx.Menu()
     self.kiteMenu = wx.Menu()
+    self.webMenu = wx.Menu()
+
+    self.main.RefreshPageKiteInfo()
 
     menu.Append(self.TBMENU_LOGVIEW, "Display PageKite Log")
     menu.Append(self.TBMENU_CONSOLE, "Open PageKite Control Panel")
     menu.AppendSeparator()
 
-    self.kiteMenu = wx.Menu()
-    if self.main.pagekite and self.main.pagekite.pk:
-      pk = self.main.pagekite.pk
-      self.kites = []
-      for kite in pk.backends:
-        item = self.kiteMenu.Append(self.TBMENU_KITE_IDS[len(self.kites)],
-                                    self.DescribeKite(kite),
-                                    kind=wx.ITEM_CHECK)
-        item.Check(pagekite.BE_STATUS_OK == pk.backends[kite][pagekite.BE_STATUS])
-        self.kites.append(kite)
-    if self.kites: self.kiteMenu.AppendSeparator()
-    self.kiteMenu.Append(self.TBMENU_GETKITE, "Get More Kites...")
+    self.webMenu.Append(self.TBMENU_SHARE_CB, "Paste To Web").Enable(self.main.pk_sharing)
+    self.webMenu.Append(self.TBMENU_SHARE_PATH, "Share From Disk").Enable(self.main.pk_sharing)
+    self.webMenu.Append(self.TBMENU_SHARE_SCRN, "Share Screenshot").Enable(self.main.pk_sharing)
+    self.webMenu.AppendSeparator()
+    self.webMenu.Append(self.TBMENU_SHARELOG, "History...").Enable(self.main.pk_sharing)
+    self.webMenu.AppendSeparator()
+    self.webMenu.Append(self.TBMENU_MIRRORING, "Mirroring...").Enable(self.main.pk_sharing)
+    self.webMenu.Append(self.TBMENU_SHARING, "Enable Sharing", kind=wx.ITEM_CHECK
+                        ).Check(self.main.pk_sharing)
+    menu.AppendMenu(self.TBMENU_WEBCTRL, "Quick Sharing (0.0 MB)", self.webMenu)
+
+    count = 0
+    for kite, be in self.main.pk_kites:
+      item = self.kiteMenu.Append(self.TBMENU_KITE_IDS[count],
+                                  self.DescribeKite(kite, be),
+                                  kind=wx.ITEM_CHECK)
+      item.Check(pagekite.BE_STATUS_OK == be[pagekite.BE_STATUS])
+      count += 1
+    if count: self.kiteMenu.AppendSeparator()
+    self.kiteMenu.Append(self.TBMENU_GETKITE, "Add More Kites...")
     menu.AppendMenu(self.TBMENU_KITES, "No Kites Configured", self.kiteMenu)
     menu.AppendSeparator()
 
-    # FIXME: Only add these two if we are using the service.
-
-    if self.main.pagekite and self.main.pagekite.pk and self.main.pagekite.pk.conns:
-      conns = self.main.pagekite.pk.conns
-      quotas = [float(c.quota[0]) for c in conns.conns if c.quota]
-      if quotas:
+    if self.main.pk_service:
+      if self.main.pk_quota:
         menu.Append(self.TBMENU_QUOTA, ("%.2f GB of Quota Left"
-                                        ) % (min(quotas)/(1024*1024)))
+                                        ) % self.main.pk_quota)
       else:
         menu.Append(self.TBMENU_QUOTA, "Quota unknown")
+      menu.Append(self.TBMENU_GETQUOTA, "Get More Quota...")
     else:
-      menu.Append(self.TBMENU_QUOTA, "Quota unknown")
-    menu.Append(self.TBMENU_GETQUOTA, "Get More Quota...")
+      menu.Append(self.TBMENU_SIGNUP, "Sign-up at PageKite.net")
     menu.AppendSeparator()
 
     menu.Append(self.TBMENU_DEBUG,  "Enable Verbose Logging", kind=wx.ITEM_CHECK)
@@ -142,8 +165,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     menu.Append(self.TBMENU_CLOSE,  "Quit PageKite")
     return menu
 
-  def DescribeKite(self, kite):
-    be = self.main.pagekite.pk.backends[kite]
+  def DescribeKite(self, kite, be):
     be_port = be[pagekite.BE_PORT]
     return '%s (%s%s)' % (be[pagekite.BE_DOMAIN], be[pagekite.BE_PROTO],
                           be_port and (', port %s' % be_port) or '')
@@ -176,10 +198,6 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     else:
       event.Check(False)
 
-  def OnUpdateMenuStatus(self, event):
-    # FIXME
-    self.popupMenu.SetLabel(self.TBMENU_STATUS, "Status: Dead")
-
   def OnUpdateMenuKites(self, event):
     if self.main.pagekite and self.main.pagekite.pk:
       event.Enable(True)
@@ -189,9 +207,9 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
       kites = 0
 
     if kites == 1:
-      self.popupMenu.SetLabel(self.TBMENU_KITES, "Your Kite" % kites)
+      self.popupMenu.SetLabel(self.TBMENU_KITES, "Your Kite (1)")
     elif kites > 1:
-      self.popupMenu.SetLabel(self.TBMENU_KITES, "Your %d Kites" % kites)
+      self.popupMenu.SetLabel(self.TBMENU_KITES, "Your Kites (%d)" % kites)
     else:
       self.popupMenu.SetLabel(self.TBMENU_KITES, "No Kites Configured")
 
@@ -207,7 +225,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     self.main.debugging = not self.main.debugging
 
   def OnTaskBarKite(self, evt):
-    kite = self.kites[self.TBMENU_KITE_IDS.index(evt.GetId())]
+    kite, be = self.main.pk_kites[self.TBMENU_KITE_IDS.index(evt.GetId())]
     # Pop up a dialog allowing:
     #   - Remove
     #   - Disable
@@ -216,10 +234,10 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     print 'Kite selected: %s' % kite
 
   def OnTaskBarGetKite(self, evt):
-    pass
+    webbrowser.open_new(URL_GETKITES % self.main.pagekite.pk.ui_sspec)
 
   def OnTaskBarGetQuota(self, evt):
-    pass
+    webbrowser.open_new(URL_GETQUOTA)
 
   def OnTaskBarActivate(self, evt):
     if self.main.IsIconized() or not self.main.IsShown():
@@ -336,14 +354,40 @@ class MainFrame(wx.Frame):
 
   def __init__(self, parent):
     wx.Frame.__init__(self, parent, title=self.TITLE, size=self.FRAME_SIZE)
-    self.debugging = False
     self.log = wx.TextCtrl(self, -1, style=self.LOG_STYLE)
+    self.pagekite = self.tbicon = None
+    self.debugging = False
+
+    self.RefreshPageKiteInfo()
 
     self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
     self.Bind(EVT_NEW_LOGLINE, self.OnNewLogLine)
 
   def CreateTaskBarIcon(self):
     self.tbicon = DemoTaskBarIcon(self)
+
+  def RefreshPageKiteInfo(self):
+    self.pk_kites = []
+    self.pk_quota = None
+    self.pk_service = None
+    self.pk_sharing = False
+    self.pk_mirroring = False
+
+    if self.pagekite and self.pagekite.pk:
+      pk = self.pagekite.pk
+
+      if pk.conns:
+        quotas = [float(c.quota[0]) for c in pk.conns.conns if c.quota]
+        if quotas: self.pk_quota = min(quotas)/(1024*1024)
+
+      for kite in pk.backends:
+        be = pk.backends[kite]
+        self.pk_kites.append((kite, be))
+        domain = be[pagekite.BE_DOMAIN]
+        for service_domain in SERVICE_DOMAINS:
+          if domain.endswith(service_domain):
+            if not self.pk_service or len(domain) < len(self.pk_service[0]):
+              self.pk_service = (domain, be[pagekite.BE_SECRET])
 
   def StartPageKite(self):
     self.pagekite = PageKiteThread(self)
