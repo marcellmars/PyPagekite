@@ -128,7 +128,6 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
       conns = self.main.pagekite.pk.conns
       quotas = [float(c.quota[0]) for c in conns.conns if c.quota]
       if quotas:
-        print 'Quotas: %s' % (quotas, )
         menu.Append(self.TBMENU_QUOTA, ("%.2f GB of Quota Left"
                                         ) % (min(quotas)/(1024*1024)))
       else:
@@ -309,9 +308,8 @@ class PageKiteThread(threading.Thread):
         time.sleep(1)
       else:
         self.alive = True
-        print 'STARTING'
         pagekite.Main(pagekite.PageKite, lambda pk: self.Configure(pk))
-        while self.pk and self.pk.IsRunning(): time.sleep(1)
+        while self.pk and self.pk.IsRunning(): time.sleep(0.2)
         self.pk = None
         self.alive = False
 
