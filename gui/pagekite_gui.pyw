@@ -43,6 +43,8 @@ import wx
 import pagekite
 
 
+ENABLE_SHARING = True
+
 SERVICE_DOMAINS = [
   '.pagekite.me', '.pagekite.net', '.pagekite.us', '.pagekite.info'
 ]
@@ -126,16 +128,17 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     menu.Append(self.TBMENU_CONSOLE, "Open PageKite Control Panel")
     menu.AppendSeparator()
 
-    self.webMenu.Append(self.TBMENU_SHARE_CB, "Paste To Web").Enable(self.main.pk_sharing)
-    self.webMenu.Append(self.TBMENU_SHARE_PATH, "Share From Disk").Enable(self.main.pk_sharing)
-    self.webMenu.Append(self.TBMENU_SHARE_SCRN, "Share Screenshot").Enable(self.main.pk_sharing)
-    self.webMenu.AppendSeparator()
-    self.webMenu.Append(self.TBMENU_SHARELOG, "History...").Enable(self.main.pk_sharing)
-    self.webMenu.AppendSeparator()
-    self.webMenu.Append(self.TBMENU_MIRRORING, "Mirroring...").Enable(self.main.pk_sharing)
-    self.webMenu.Append(self.TBMENU_SHARING, "Enable Sharing", kind=wx.ITEM_CHECK
-                        ).Check(self.main.pk_sharing)
-    menu.AppendMenu(self.TBMENU_WEBCTRL, "Quick Sharing (0.0 MB)", self.webMenu)
+    if ENABLE_SHARING and self.main.pk_httpd:
+      self.webMenu.Append(self.TBMENU_SHARE_CB, "Paste To Web").Enable(self.main.pk_sharing)
+      self.webMenu.Append(self.TBMENU_SHARE_PATH, "Share From Disk").Enable(self.main.pk_sharing)
+      self.webMenu.Append(self.TBMENU_SHARE_SCRN, "Share Screenshot").Enable(self.main.pk_sharing)
+      self.webMenu.AppendSeparator()
+      self.webMenu.Append(self.TBMENU_SHARELOG, "History...").Enable(self.main.pk_sharing)
+      self.webMenu.AppendSeparator()
+      self.webMenu.Append(self.TBMENU_MIRRORING, "Mirroring...").Enable(self.main.pk_sharing)
+      self.webMenu.Append(self.TBMENU_SHARING, "Enable Sharing", kind=wx.ITEM_CHECK
+                          ).Check(self.main.pk_sharing)
+      menu.AppendMenu(self.TBMENU_WEBCTRL, "Quick Sharing (0.0 MB)", self.webMenu)
 
     count = 0
     for kite, be in self.main.pk_kites:
@@ -217,9 +220,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     event.Enable(False)
 
   def OnUpdateMenuConsole(self, event):
-    event.Enable((self.main.pagekite and
-                  self.main.pagekite.pk and
-                  self.main.pagekite.pk.ui_httpd) and True or False)
+    event.Enable(self.main.pk_httpd and True or False)
 
   def OnTaskBarDebug(self, evt):
     self.main.debugging = not self.main.debugging
@@ -234,7 +235,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     print 'Kite selected: %s' % kite
 
   def OnTaskBarGetKite(self, evt):
-    webbrowser.open_new(URL_GETKITES % self.main.pagekite.pk.ui_sspec)
+    webbrowser.open_new(URL_GETKITES % self.main.pk_httpd)
 
   def OnTaskBarGetQuota(self, evt):
     webbrowser.open_new(URL_GETQUOTA)
@@ -258,7 +259,7 @@ class DemoTaskBarIcon(wx.TaskBarIcon):
     self.main.pagekite.restart()
 
   def OnTaskBarConsole(self, evt):
-    webbrowser.open_new('http://%s:%s/' % self.main.pagekite.pk.ui_sspec)
+    webbrowser.open_new('http://%s:%s/' % self.main.pk_httpd)
 
   def OnTaskBarClose(self, evt):
     self.main.Close(force=True)
@@ -368,6 +369,7 @@ class MainFrame(wx.Frame):
 
   def RefreshPageKiteInfo(self):
     self.pk_kites = []
+    self.pk_httpd = None
     self.pk_quota = None
     self.pk_service = None
     self.pk_sharing = False
@@ -375,6 +377,8 @@ class MainFrame(wx.Frame):
 
     if self.pagekite and self.pagekite.pk:
       pk = self.pagekite.pk
+
+      self.pk_httpd = pk.ui_sspec
 
       if pk.conns:
         quotas = [float(c.quota[0]) for c in pk.conns.conns if c.quota]
